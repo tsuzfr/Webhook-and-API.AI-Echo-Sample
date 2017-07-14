@@ -3,80 +3,85 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 
-const restService = express();
+const app = express();
+const http = require('http').Server(app);
+const io = require('socket.io')(http);
+const uuidv4 = require('uuid/v4');
+const apiai = require('apiai');
+const _ = require('lodash');
+const moment = require('moment');
+const apiaiCli = apiai(process.env.API_AI_CLIENT_TOKEN);
+const userSessions = {};
 
-restService.use(bodyParser.urlencoded({
-    extended: true
+io.on('connection', function(socket) {
+  const uuid = uuidv4();
+  userSessions[uuid] = {  };
+  console.log('New Connection with ID: ', uuid);
+  socket.emit('connection', 'You are connected.');
+
+  socket.on('message', function(message) {
+    console.log("Outputting : message received", message);
+    const request = apiaiCli.textRequest(message, {
+        sessionId: uuid
+    });
+    request.on('response', function(response) {
+        console.log('response from Algorithm', response);
+        const message = consumePayload(response);
+        console.log("Outputting : message", message);
+        socket.emit('message', message);
+    });
+    request.on('error', function(error) {
+        socket.emit('message', 'There was an error in the backend..');
+        throw error;
+    });
+    request.end();
+  });
+
+});
+
+function consumePayload(payload) {
+  const intent = _.get(payload, 'result.metadata.intentName');
+  const id = _.get(payload, 'id');
+  const batchId = uuidv4();
+  const sessionId = _.get(payload, 'sessionId');
+
+  console.log("Outputting : intent", intent, " sessionId: "+sessionId+" current value:", );
+
+  if (intent === 'Summary') {
+    return {
+      intent: 'summary',
+      batchId,
+      id,
+      message: {
+        actions: [
+
+        ],
+        body: 'Hello'
+      }
+    }
+  }
+}
+
+app.use(bodyParser.urlencoded({
+  extended: true
 }));
 
-restService.use(bodyParser.json());
+app.use(bodyParser.json());
 
-restService.post('/echo', function(req, res) {
-    var speech = req.body.result && req.body.result.parameters && req.body.result.parameters.echoText ? req.body.result.parameters.echoText : "Seems like some problem. Speak again."
-    return res.json({
-        speech: speech,
-        displayText: speech,
-        source: 'webhook-echo-sample'
-    });
+app.use(express.static(__dirname + '/public'));
+
+app.post('/webhook', function(req, res) {
+  console.log(req.originalUrl); // '/admin/new'
+  console.log(req.baseUrl); // '/admin'
+  console.log(req.path); // '/new'
+  console.log(req.query); // '/new'
+  console.log('req.body', req.body);
 });
 
-restService.post('/slack-test', function(req, res) {
-
-    var slack_message = {
-        "text": "Details of JIRA board for Browse and Commerce",
-        "attachments": [{
-            "title": "JIRA Board",
-            "title_link": "http://www.google.com",
-            "color": "#36a64f",
-
-            "fields": [{
-                "title": "Epic Count",
-                "value": "50",
-                "short": "false"
-            }, {
-                "title": "Story Count",
-                "value": "40",
-                "short": "false"
-            }],
-
-            "thumb_url": "https://stiltsoft.com/blog/wp-content/uploads/2016/01/5.jira_.png"
-        }, {
-            "title": "Story status count",
-            "title_link": "http://www.google.com",
-            "color": "#f49e42",
-
-            "fields": [{
-                "title": "Not started",
-                "value": "50",
-                "short": "false"
-            }, {
-                "title": "Development",
-                "value": "40",
-                "short": "false"
-            }, {
-                "title": "Development",
-                "value": "40",
-                "short": "false"
-            }, {
-                "title": "Development",
-                "value": "40",
-                "short": "false"
-            }]
-        }]
-    }
-    return res.json({
-        speech: "speech",
-        displayText: "speech",
-        source: 'webhook-echo-sample',
-        data: {
-            "slack": slack_message
-        }
-    });
+app.get('/', function(req, res) {
+    res.render('index.html');
 });
 
-
-
-
-restService.listen((process.env.PORT || 8000), function() {
+http.listen((process.env.PORT || 8000), function() {
     console.log("Server up and listening");
 });
